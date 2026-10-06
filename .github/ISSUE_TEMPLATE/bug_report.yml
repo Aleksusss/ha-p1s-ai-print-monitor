@@ -1,0 +1,42 @@
+name: Bug report
+description: Something does not work as described in the installation guide.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before posting, remove tokens, IP addresses, URLs and your printer serial from everything below.
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.10.0"
+    validations:
+      required: true
+  - type: input
+    id: bambulab_version
+    attributes:
+      label: ha-bambulab version
+    validations:
+      required: true
+  - type: input
+    id: ml_image
+    attributes:
+      label: Obico ML image tag
+      placeholder: "0.1.0-release.1.4241"
+  - type: input
+    id: status
+    attributes:
+      label: Text of input_text.p1s_ai_status
+      placeholder: "ML error (400)"
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines or automation trace
+      render: text

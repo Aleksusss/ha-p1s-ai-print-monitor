@@ -1,0 +1,39 @@
+name: False alarm or missed failure
+description: The AI warned or paused on a good print, or missed a real failure.
+labels: [detection]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Data from real prints is the only way to tune detection. Remove your printer serial and any personal details from images before attaching them.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Type
+      options:
+        - False alarm (warning on a good print)
+        - False pause (pause on a good print)
+        - Missed failure
+    validations:
+      required: true
+  - type: textarea
+    id: logbook
+    attributes:
+      label: Logbook entries named "P1S AI"
+      description: Copy the entries around the event; they contain the boxes as [conf, xc, yc, w, h].
+      render: text
+  - type: textarea
+    id: frames
+    attributes:
+      label: Archived frames
+      description: Attach the matching images from /homeassistant/obico_history.
+  - type: input
+    id: settings
+    attributes:
+      label: Sensitivity and ignore_zones
+      placeholder: "1.0, []"
+  - type: input
+    id: filament
+    attributes:
+      label: Filament and build plate
+      placeholder: "Black PLA, textured PEI"

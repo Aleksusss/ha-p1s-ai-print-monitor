@@ -1,0 +1,28 @@
+# Obico ML backend for Home Assistant AI print monitoring
+# Put ML_API_TOKEN in .env next to this file (never commit it).
+services:
+  redis:
+    restart: unless-stopped
+    image: redis:7.2-alpine
+    command: redis-server --appendonly yes --appendfsync everysec --save 900 1 --save 300 10 --save 60 10000
+    volumes:
+      - ./redis:/data
+    networks:
+      - obico_ml
+  ml_api:
+    restart: unless-stopped
+    image: ghcr.io/thespaghettidetective/obico-server/ml:0.1.0-release.1.4241
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - ML_API_TOKEN=${ML_API_TOKEN}
+      - TZ=Etc/UTC   # set your timezone, e.g. Europe/Berlin
+    ports:
+      - 3333:3333
+    command: bash -c "gunicorn --bind 0.0.0.0:3333 --workers 1 wsgi"
+    depends_on:
+      - redis
+    networks:
+      - obico_ml
+networks:
+  obico_ml:
+    driver: bridge

@@ -1,0 +1,797 @@
+# =============================================================================
+# P1S AI Print Monitor - Obico ML backend (Home Assistant package)
+# https://github.com/Aleksusss/ha-p1s-ai-print-monitor - AGPL-3.0
+#
+# The ML API returns every box with confidence >= 0.08 (hardcoded THRESH in
+# ml_api/server.py). Filtering and smoothing are the client's job; this package
+# ports Obico's own scoring (backend/lib/prediction.py, FD_1ST_GEN_PARAMS).
+# Obico's hyperparameters are tuned for one frame every 10 s - keep that interval.
+#
+# Before use, replace every placeholder (see docs/installation.md):
+#   p1s_yourserial               -> your ha-bambulab entity prefix
+#   HA_HOST                      -> Home Assistant IP, reachable from the ML host
+#   ML_HOST                      -> Docker host running the Obico ML container
+#   notify.mobile_app_your_phone -> your mobile app notify service
+# Secret required in secrets.yaml:  p1s_ml_auth_header: "Bearer <ML_API_TOKEN>"
+# =============================================================================
+
+input_number:
+  p1s_spaghetti_quality:
+    name: P1S AI print quality
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+  # --- Tunables (set once via script.p1s_ai_apply_defaults) ---
+  p1s_ai_sensitivity:
+    name: P1S AI sensitivity
+    min: 0.5
+    max: 1.5
+    step: 0.05
+    mode: slider
+    icon: mdi:tune-vertical
+  p1s_ai_cooldown_minutes:
+    name: P1S AI cooldown after review
+    min: 5
+    max: 60
+    step: 5
+    unit_of_measurement: min
+    mode: slider
+    icon: mdi:timer-sand
+
+  # --- Internal state (restored across restarts - do not add "initial") ---
+  p1s_ai_frame_num:
+    name: P1S AI frames this print
+    min: 0
+    max: 1000000
+    step: 1
+    mode: box
+  p1s_ai_lifetime_frames:
+    name: P1S AI lifetime frames
+    min: 0
+    max: 100000000
+    step: 1
+    mode: box
+  p1s_ai_frame_p:
+    name: P1S AI frame p
+    min: 0
+    max: 100
+    step: 0.0001
+    unit_of_measurement: p
+    mode: box
+  p1s_ai_ewm:
+    name: P1S AI EWM
+    min: 0
+    max: 100
+    step: 0.0001
+    unit_of_measurement: p
+    mode: box
+  p1s_ai_rolling_short:
+    name: P1S AI print mean
+    min: 0
+    max: 100
+    step: 0.0001
+    unit_of_measurement: p
+    mode: box
+  p1s_ai_baseline:
+    name: P1S AI printer baseline
+    min: 0
+    max: 100
+    step: 0.0001
+    unit_of_measurement: p
+    mode: box
+  p1s_ai_score:
+    name: P1S AI score
+    min: -100
+    max: 100
+    step: 0.0001
+    unit_of_measurement: p
+    mode: box
+    icon: mdi:chart-bell-curve
+
+input_datetime:
+  p1s_ai_cooldown_until:
+    name: P1S AI cooldown until
+    has_date: true
+    has_time: true
+  p1s_last_ai_check:
+    name: P1S AI last check
+    has_date: true
+    has_time: true
+  p1s_last_ai_alert:
+    name: P1S AI last alert
+    has_date: true
+    has_time: true
+
+input_text:
+  p1s_ai_status:
+    name: P1S AI status
+    max: 100
+    icon: mdi:robot-outline
+  p1s_last_ai_result_raw:
+    name: P1S AI last result
+    max: 255
+    icon: mdi:code-json
+
+counter:
+  p1s_ai_total_alerts:
+    name: P1S AI total alerts
+    icon: mdi:alert
+  p1s_ai_total_auto_pauses:
+    name: P1S AI total auto pauses
+    icon: mdi:pause-circle
+  p1s_ai_total_false_alarms:
+    name: P1S AI total false alarms
+    icon: mdi:alert-remove
+
+input_boolean:
+  p1s_ai_enabled:
+    name: P1S AI monitoring
+    icon: mdi:robot
+  p1s_ai_auto_pause_enabled:
+    name: P1S AI auto pause
+    icon: mdi:pause-octagon
+  p1s_ai_notify_only_mode:
+    name: P1S AI notify only
+    icon: mdi:bell-ring
+  p1s_ai_alert_active:
+    name: P1S AI alert active
+    icon: mdi:alert-circle
+  p1s_spaghetti_detected:
+    name: P1S AI failure suspected
+    icon: mdi:alert-octagram
+  p1s_auto_light_off_on_print:
+    name: P1S light off on print (AI off only)
+    icon: mdi:lightbulb-off
+  # "on" = the light was switched on by automation, so it may switch it off after the print.
+  # A light that was already on (or switched on by hand) is never switched off.
+  p1s_ai_light_owned:
+    name: P1S chamber light owned by automation
+    icon: mdi:lightbulb-auto
+
+rest_command:
+  p1s_ai_ml_predict:
+    url: "http://ML_HOST:3333/p/?img=http://HA_HOST:8123/local/obico/latest.jpg"
+    method: get
+    headers:
+      Authorization: !secret p1s_ml_auth_header
+    timeout: 20
+
+shell_command:
+  # Templated commands run without a shell (no pipes/redirects) - plain cp is fine.
+  p1s_ai_archive_frame: "cp /config/www/obico/latest.jpg /config/obico_history/{{ frame_id }}.jpg"
+  p1s_ai_save_alert_frame: "cp /config/www/obico/latest.jpg /config/www/obico/alert.jpg"
+  p1s_ai_cleanup_history: "find /config/obico_history -name '*.jpg' -mtime +14 -delete"
+
+automation:
+  # ---------------------------------------------------------------------------
+  # Score one frame every 10 s while printing
+  # ---------------------------------------------------------------------------
+  - id: p1s_ai_score_frame
+    alias: "P1S AI - Score frame (every 10 s)"
+    description: "Snapshot -> Obico ML -> Obico-style EWM scoring -> warn / pause"
+    mode: single
+    max_exceeded: silent
+    triggers:
+      - trigger: time_pattern
+        seconds: "/10"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.p1s_ai_enabled
+        state: "on"
+      - condition: state
+        entity_id: sensor.p1s_yourserial_print_status
+        state: "running"
+    variables:
+      # Obico FD_1ST_GEN_PARAMS (tuned for a 10 s interval)
+      ewm_alpha: "{{ 2 / (12 + 1) }}"
+      win_short: 310
+      win_long: 7200
+      t_low: 0.38
+      t_high: 0.78
+      safe_frames: 30
+      short_mult: 3.8
+      escalate: 1.75
+      # Local filters
+      min_conf: 0.08          # per-box confidence floor; 0.08 = same as Obico
+      archive_min_conf: 0.2   # archive frames whose strongest box >= this
+      # Boxes whose centre falls inside any rectangle are ignored.
+      # Format: [x1, y1, x2, y2] in snapshot pixels, e.g. [[0, 0, 220, 160]]
+      ignore_zones: []
+      stage: "{{ states('sensor.p1s_yourserial_current_stage') }}"
+      light_on: "{{ is_state('light.p1s_yourserial_chamber_light', 'on') }}"
+      # Camera auto-exposure needs a moment after the light switches
+      light_settle_s: 20
+      light_age: >-
+        {{ as_timestamp(now()) - as_timestamp(states.light.p1s_yourserial_chamber_light.last_changed, 0) }}
+    actions:
+      # 1. Only score frames the model can make sense of
+      - if: "{{ not light_on or light_age < light_settle_s or stage != 'printing' }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.p1s_ai_status
+            data:
+              value: >-
+                {%- if not light_on -%}Skipped: chamber light off
+                {%- elif light_age < light_settle_s -%}Skipped: light settling
+                {%- else -%}Skipped: {{ stage }}{%- endif -%}
+          - stop: "Frame not scored"
+
+      # 2. Grab the frame and send it to the ML backend
+      - action: camera.snapshot
+        target:
+          entity_id: camera.p1s_yourserial_camera
+        data:
+          filename: /config/www/obico/latest.jpg
+      - action: rest_command.p1s_ai_ml_predict
+        response_variable: ml
+        continue_on_error: true
+      - if: >-
+          {{ ml is not defined or ml.status != 200 or ml.content is not mapping
+             or ml.content.detections is not defined }}
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.p1s_ai_status
+            data:
+              value: "ML error ({{ ml.status if ml is defined else 'no response' }})"
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.p1s_last_ai_result_raw
+            data:
+              value: >-
+                {{ (ml.content.message if ml is defined and ml.content is mapping
+                    and ml.content.message is defined else 'ml_request_failed')[:100] }}
+          - stop: "ML backend error"
+
+      # 3. Frame score p = sum of box confidences (as in Obico), after local filters
+      - variables:
+          s: >-
+            {%- set ns = namespace(p=0.0, mx=0.0, n=0) -%}
+            {%- for d in ml.content.detections -%}
+              {%- set c = d[1] | float(0) -%}
+              {%- set b = d[2] -%}
+              {%- set z = namespace(hit=false) -%}
+              {%- for r in ignore_zones -%}
+                {%- if r[0] <= b[0] and b[0] <= r[2] and r[1] <= b[1] and b[1] <= r[3] -%}
+                  {%- set z.hit = true -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {%- if c >= min_conf and not z.hit -%}
+                {%- set ns.p = ns.p + c -%}
+                {%- set ns.mx = [ns.mx, c] | max -%}
+                {%- set ns.n = ns.n + 1 -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {{ {'p': ns.p | round(4), 'max': ns.mx | round(3), 'n': ns.n} }}
+
+      # 4. Obico smoothing: EWM vs this-print mean vs long-term printer baseline
+      - variables:
+          p: "{{ '%.4f' | format(s.p | float(0)) }}"
+          frame: "{{ states('input_number.p1s_ai_frame_num') | int(0) + 1 }}"
+          life: "{{ states('input_number.p1s_ai_lifetime_frames') | int(0) + 1 }}"
+          # Fixed-point formatting on purpose: HA keeps values like "8e-05" as strings
+          ewm: >-
+            {{ '%.6f' | format(p * ewm_alpha + (states('input_number.p1s_ai_ewm') | float(0)) * (1 - ewm_alpha)) }}
+          rs: >-
+            {%- set prev = states('input_number.p1s_ai_rolling_short') | float(0) -%}
+            {{ '%.6f' | format(prev + (p - prev) / (win_short if win_short <= frame else frame + 1)) }}
+          rl: >-
+            {%- set prev = states('input_number.p1s_ai_baseline') | float(0) -%}
+            {{ '%.6f' | format(prev + (p - prev) / (win_long if win_long <= life else life + 1)) }}
+          sens: "{{ states('input_number.p1s_ai_sensitivity') | float(1) }}"
+          score: "{{ '%.4f' | format((ewm | float(0) - rl | float(0)) * sens) }}"
+          warmed_up: "{{ frame >= safe_frames }}"
+          warn: >-
+            {%- set adj = (ewm | float(0) - rl | float(0)) * sens -%}
+            {{ warmed_up and adj >= t_low and (adj > t_high or adj > (rs | float(0) - rl | float(0)) * short_mult) }}
+          pause_level: >-
+            {%- set adj = (ewm | float(0) - rl | float(0)) * sens / escalate -%}
+            {{ warmed_up and adj >= t_low and (adj > t_high or adj > (rs | float(0) - rl | float(0)) * short_mult) }}
+
+      # 5. Persist state
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.p1s_ai_frame_num
+        data:
+          value: "{{ frame }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.p1s_ai_lifetime_frames
+        data:
+          value: "{{ life }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.p1s_ai_frame_p
+        data:
+          value: "{{ p }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.p1s_ai_ewm
+        data:
+          value: "{{ ewm }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.p1s_ai_rolling_short
+        data:
+          value: "{{ rs }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.p1s_ai_baseline
+        data:
+          value: "{{ rl }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.p1s_ai_score
+        data:
+          value: "{{ score }}"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.p1s_spaghetti_quality
+        data:
+          value: "{{ (100 - ([[(score | float(0)) / t_high, 0] | max, 1] | min) * 100) | round(0) }}"
+      - action: "input_boolean.turn_{{ 'on' if warn else 'off' }}"
+        target:
+          entity_id: input_boolean.p1s_spaghetti_detected
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.p1s_ai_status
+        data:
+          value: >-
+            {%- if not warmed_up -%}Warming up ({{ frame }}/{{ safe_frames }})
+            {%- elif pause_level -%}Failure likely
+            {%- elif warn -%}Failure suspected
+            {%- else -%}OK{%- endif -%}
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.p1s_last_ai_result_raw
+        data:
+          value: >-
+            p={{ s.p }} max={{ s.max }} n={{ s.n }}/{{ ml.content.detections | count }} ewm={{ ewm }} base={{ rl }}
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.p1s_last_ai_check
+        data:
+          timestamp: "{{ as_timestamp(now()) }}"
+
+      # 6. Archive suspicious frames + raw boxes for tuning (see Logbook, name "P1S AI")
+      - if: "{{ s.max >= archive_min_conf }}"
+        then:
+          - variables:
+              frame_id: "{{ now().strftime('%Y%m%d-%H%M%S') }}"
+          - action: shell_command.p1s_ai_archive_frame
+            data:
+              frame_id: "{{ frame_id }}"
+            continue_on_error: true
+          - action: logbook.log
+            data:
+              name: P1S AI
+              message: >-
+                frame {{ frame_id }} layer {{ states('sensor.p1s_yourserial_current_layer') }}
+                p={{ s.p }} score={{ score }} boxes [conf,xc,yc,w,h]:
+                {%- for d in ml.content.detections %} [{{ d[1] | round(2) }},{{ d[2][0] | int }},{{ d[2][1] | int }},{{ d[2][2] | int }},{{ d[2][3] | int }}]{%- endfor %}
+
+      # 7. Alerting: warn first, pause only on a 1.75x stronger signal (Obico escalation)
+      - variables:
+          in_cooldown: >-
+            {{ as_timestamp(now()) < (state_attr('input_datetime.p1s_ai_cooldown_until', 'timestamp') | float(0)) }}
+          can_pause: >-
+            {{ is_state('input_boolean.p1s_ai_auto_pause_enabled', 'on')
+               and is_state('input_boolean.p1s_ai_notify_only_mode', 'off') }}
+          already_alerted: "{{ is_state('input_boolean.p1s_ai_alert_active', 'on') }}"
+          img: "/local/obico/alert.jpg?v={{ as_timestamp(now()) | int }}"
+      - choose:
+          - conditions: "{{ pause_level and can_pause and not in_cooldown }}"
+            sequence:
+              - action: shell_command.p1s_ai_save_alert_frame
+                continue_on_error: true
+              - action: button.press
+                target:
+                  entity_id: button.p1s_yourserial_pause_printing
+              - action: counter.increment
+                target:
+                  entity_id: counter.p1s_ai_total_auto_pauses
+              - if: "{{ not already_alerted }}"
+                then:
+                  - action: counter.increment
+                    target:
+                      entity_id: counter.p1s_ai_total_alerts
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.p1s_ai_alert_active
+              - action: input_datetime.set_datetime
+                target:
+                  entity_id: input_datetime.p1s_last_ai_alert
+                data:
+                  timestamp: "{{ as_timestamp(now()) }}"
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.p1s_ai_status
+                data:
+                  value: "Paused by AI (score {{ score }})"
+              # Block re-entry until the printer actually leaves "running"
+              - wait_template: "{{ not is_state('sensor.p1s_yourserial_print_status', 'running') }}"
+                timeout: "00:00:30"
+                continue_on_timeout: true
+              - action: notify.mobile_app_your_phone
+                data:
+                  title: "P1S paused"
+                  message: >-
+                    {{ 'Print paused.' if wait.completed else 'PAUSE FAILED - printer still running!' }}
+                    Print failure likely (score {{ score }}). Review, then resume or stop from the dashboard.
+                  data:
+                    image: "{{ img }}"
+                    push:
+                      interruption-level: time-sensitive
+
+          - conditions: "{{ warn and not already_alerted and not in_cooldown }}"
+            sequence:
+              - action: shell_command.p1s_ai_save_alert_frame
+                continue_on_error: true
+              - action: counter.increment
+                target:
+                  entity_id: counter.p1s_ai_total_alerts
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.p1s_ai_alert_active
+              - action: input_datetime.set_datetime
+                target:
+                  entity_id: input_datetime.p1s_last_ai_alert
+                data:
+                  timestamp: "{{ as_timestamp(now()) }}"
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.p1s_ai_status
+                data:
+                  value: "Alert: failure suspected (score {{ score }})"
+              - action: notify.mobile_app_your_phone
+                data:
+                  title: "P1S alert"
+                  message: >-
+                    Possible print failure (score {{ score }}).
+                    {{ 'Notify-only mode is on.' if is_state('input_boolean.p1s_ai_notify_only_mode', 'on')
+                       else ('Will auto-pause if it gets worse.' if can_pause else 'Auto-pause is disabled.') }}
+                  data:
+                    image: "{{ img }}"
+
+  # ---------------------------------------------------------------------------
+  # Print lifecycle: reset per-print state on a new print, keep alerts on pause
+  # ---------------------------------------------------------------------------
+  - id: p1s_ai_print_lifecycle
+    alias: "P1S AI - Print lifecycle"
+    mode: queued
+    max: 10
+    triggers:
+      - trigger: state
+        entity_id: sensor.p1s_yourserial_print_status
+        not_to:
+          - unavailable
+          - unknown
+        id: status
+      - trigger: state
+        entity_id: input_boolean.p1s_ai_enabled
+        id: toggle
+    variables:
+      status: "{{ states('sensor.p1s_yourserial_print_status') }}"
+      prev: >-
+        {{ trigger.from_state.state if trigger.id == 'status' and trigger.from_state is not none else '' }}
+    actions:
+      # New print (not a resume, not a Wi-Fi/HA reconnect): reset per-print state.
+      # The long-term printer baseline is kept on purpose.
+      - if: >-
+          {{ trigger.id == 'status' and status == 'running'
+             and prev not in ['running', 'pause', 'offline', 'unavailable', 'unknown'] }}
+        then:
+          - action: script.p1s_ai_reset_print_state
+      # Resumed from the printer / Bambu Handy after an alert: treat as reviewed
+      - if: >-
+          {{ trigger.id == 'status' and prev == 'pause' and status == 'running'
+             and is_state('input_boolean.p1s_ai_alert_active', 'on') }}
+        then:
+          - action: script.p1s_ai_clear_alert
+            data:
+              start_cooldown: true
+              status_text: "Resumed - cooldown active"
+              raw_text: resumed_externally
+      - choose:
+          - conditions: "{{ is_state('input_boolean.p1s_ai_enabled', 'off') }}"
+            sequence:
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.p1s_ai_status
+                data:
+                  value: "Disabled"
+          - conditions: "{{ status == 'running' }}"
+            sequence:
+              - if: "{{ is_state('input_boolean.p1s_ai_alert_active', 'off') }}"
+                then:
+                  - action: input_text.set_value
+                    target:
+                      entity_id: input_text.p1s_ai_status
+                    data:
+                      value: "Monitoring"
+          - conditions: "{{ status == 'pause' }}"
+            sequence:
+              - action: input_text.set_value
+                target:
+                  entity_id: input_text.p1s_ai_status
+                data:
+                  value: >-
+                    {{ 'Paused - review required' if is_state('input_boolean.p1s_ai_alert_active', 'on')
+                       else 'Print paused' }}
+        default:
+          - action: script.p1s_ai_clear_alert
+            data:
+              start_cooldown: false
+              status_text: "Idle"
+              raw_text: monitoring_stopped
+
+  # ---------------------------------------------------------------------------
+  # Chamber light
+  #  - AI enabled: light ON for the whole print (the model is blind in the dark);
+  #    switched off 5 min after the print, but only if this automation switched it on.
+  #  - AI disabled + p1s_auto_light_off_on_print on: light OFF when printing starts
+  #    or resumes (dark-print mode).
+  #  - Both off: the light is not touched.
+  # ---------------------------------------------------------------------------
+  - id: p1s_chamber_light_control
+    alias: "P1S - Chamber light control"
+    description: "AI on: light on during prints. AI off + auto-light-off: light off at print start."
+    mode: queued
+    max: 10
+    triggers:
+      - trigger: state
+        entity_id: sensor.p1s_yourserial_print_status
+        not_to:
+          - unavailable
+          - unknown
+        id: status
+      - trigger: state
+        entity_id:
+          - input_boolean.p1s_auto_light_off_on_print
+          - input_boolean.p1s_ai_enabled
+        id: policy
+      - trigger: state
+        entity_id: light.p1s_yourserial_chamber_light
+        from: "on"
+        to: "off"
+        id: light_off
+      - trigger: state
+        entity_id: sensor.p1s_yourserial_print_status
+        to:
+          - finish
+          - failed
+          - idle
+        for: "00:05:00"
+        id: print_done
+      # Restart-safe fallback for the 5 min timer above
+      - trigger: time_pattern
+        minutes: "/15"
+        id: sweep
+    variables:
+      status: "{{ states('sensor.p1s_yourserial_print_status') }}"
+      printing: "{{ status in ['prepare', 'running', 'pause'] }}"
+      ai_on: "{{ is_state('input_boolean.p1s_ai_enabled', 'on') }}"
+      want_on: "{{ printing and ai_on }}"
+      want_off: "{{ printing and not ai_on and is_state('input_boolean.p1s_auto_light_off_on_print', 'on') }}"
+      owned: "{{ is_state('input_boolean.p1s_ai_light_owned', 'on') }}"
+      prev: >-
+        {{ trigger.from_state.state if trigger.id == 'status' and trigger.from_state is not none else '' }}
+    actions:
+      - choose:
+          # Light went off
+          - conditions: "{{ trigger.id == 'light_off' }}"
+            sequence:
+              - if: "{{ trigger.to_state.context.user_id is not none }}"
+                then:
+                  # Switched off by hand from HA: respect it until the next print
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: input_boolean.p1s_ai_light_owned
+                else:
+                  # Firmware / printer screen / Handy switched it off while AI needs it: restore
+                  - condition: template
+                    value_template: "{{ want_on }}"
+                  - delay: "00:00:05"
+                  - condition: template
+                    value_template: >-
+                      {{ is_state('light.p1s_yourserial_chamber_light', 'off')
+                         and is_state('input_boolean.p1s_ai_enabled', 'on')
+                         and states('sensor.p1s_yourserial_print_status') in ['prepare', 'running', 'pause'] }}
+                  - action: light.turn_on
+                    target:
+                      entity_id: light.p1s_yourserial_chamber_light
+
+          # AI needs light: print started (not a resume) or AI switched on mid-print
+          - conditions: >-
+              {{ want_on and is_state('light.p1s_yourserial_chamber_light', 'off')
+                 and (trigger.id == 'policy'
+                      or (trigger.id == 'status' and prev not in ['prepare', 'running', 'pause'])) }}
+            sequence:
+              - action: light.turn_on
+                target:
+                  entity_id: light.p1s_yourserial_chamber_light
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.p1s_ai_light_owned
+
+          # Dark-print mode (AI off): light off 5 s after printing starts or resumes
+          - conditions: >-
+              {{ want_off
+                 and (trigger.id == 'policy'
+                      or (trigger.id == 'status' and status == 'running' and prev != 'running')) }}
+            sequence:
+              - delay: "00:00:05"
+              - condition: template
+                value_template: >-
+                  {{ is_state('sensor.p1s_yourserial_print_status', 'running')
+                     and is_state('input_boolean.p1s_ai_enabled', 'off')
+                     and is_state('input_boolean.p1s_auto_light_off_on_print', 'on') }}
+              - action: light.turn_off
+                target:
+                  entity_id: light.p1s_yourserial_chamber_light
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.p1s_ai_light_owned
+
+          # Print over for 5+ min: switch off a light this automation switched on
+          - conditions: >-
+              {{ trigger.id in ['print_done', 'sweep'] and owned and not printing
+                 and status not in ['unavailable', 'unknown']
+                 and as_timestamp(now()) - as_timestamp(states.sensor.p1s_yourserial_print_status.last_changed, 0) >= 300 }}
+            sequence:
+              - if: "{{ is_state('light.p1s_yourserial_chamber_light', 'on') }}"
+                then:
+                  - action: light.turn_off
+                    target:
+                      entity_id: light.p1s_yourserial_chamber_light
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.p1s_ai_light_owned
+
+  # ---------------------------------------------------------------------------
+  # Housekeeping: drop archived frames older than 14 days
+  # ---------------------------------------------------------------------------
+  - id: p1s_ai_cleanup_history
+    alias: "P1S AI - Clean up archived frames"
+    triggers:
+      - trigger: time
+        at: "04:30:00"
+    actions:
+      - action: shell_command.p1s_ai_cleanup_history
+
+script:
+  p1s_ai_clear_alert:
+    alias: "P1S AI - Clear alert (internal)"
+    mode: queued
+    fields:
+      start_cooldown:
+        description: "Suppress new alerts and pauses for p1s_ai_cooldown_minutes"
+        example: true
+      status_text:
+        description: "Text for input_text.p1s_ai_status"
+        example: "Monitoring"
+      raw_text:
+        description: "Text for input_text.p1s_last_ai_result_raw"
+        example: "alert_cleared"
+    sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+            - input_boolean.p1s_ai_alert_active
+            - input_boolean.p1s_spaghetti_detected
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.p1s_spaghetti_quality
+        data:
+          value: 100
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.p1s_ai_cooldown_until
+        data:
+          timestamp: >-
+            {{ as_timestamp(now())
+               + ((states('input_number.p1s_ai_cooldown_minutes') | float(15)) * 60
+                  if start_cooldown | default(false) else 0) }}
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.p1s_ai_status
+        data:
+          value: "{{ status_text | default('Monitoring') }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.p1s_last_ai_result_raw
+        data:
+          value: "{{ raw_text | default('alert_cleared') }}"
+
+  p1s_ai_reset_print_state:
+    alias: "P1S AI - Reset per-print state (internal)"
+    sequence:
+      - action: input_number.set_value
+        target:
+          entity_id:
+            - input_number.p1s_ai_frame_num
+            - input_number.p1s_ai_frame_p
+            - input_number.p1s_ai_ewm
+            - input_number.p1s_ai_rolling_short
+            - input_number.p1s_ai_score
+        data:
+          value: 0
+      - action: script.p1s_ai_clear_alert
+        data:
+          start_cooldown: false
+          status_text: "Monitoring"
+          raw_text: new_print
+
+  p1s_ai_acknowledge_false_alarm:
+    alias: "P1S - AI Acknowledge False Alarm"
+    sequence:
+      - action: counter.increment
+        target:
+          entity_id: counter.p1s_ai_total_false_alarms
+      - action: script.p1s_ai_clear_alert
+        data:
+          start_cooldown: true
+          status_text: "False alarm acknowledged"
+          raw_text: false_alarm_acknowledged
+
+  p1s_ai_resume_after_review:
+    alias: "P1S - AI Resume After Review"
+    sequence:
+      - action: script.p1s_ai_clear_alert
+        data:
+          start_cooldown: true
+          status_text: "Resuming after review"
+          raw_text: resume_after_review
+      - action: button.press
+        target:
+          entity_id: button.p1s_yourserial_resume_printing
+
+  p1s_ai_stop_after_review:
+    alias: "P1S - AI Stop After Review"
+    sequence:
+      - action: script.p1s_ai_clear_alert
+        data:
+          start_cooldown: false
+          status_text: "Stopped after review"
+          raw_text: stop_after_review
+      - action: button.press
+        target:
+          entity_id: button.p1s_yourserial_stop_printing
+
+  p1s_ai_reset_alert_state:
+    alias: "P1S - AI Reset Alert State"
+    sequence:
+      - action: script.p1s_ai_clear_alert
+        data:
+          start_cooldown: false
+          status_text: "Monitoring reset"
+          raw_text: alert_state_reset
+
+  p1s_ai_reset_baseline:
+    alias: "P1S AI - Reset long-term baseline"
+    description: "Use after moving the camera, changing lighting or the build plate"
+    sequence:
+      - action: input_number.set_value
+        target:
+          entity_id:
+            - input_number.p1s_ai_baseline
+            - input_number.p1s_ai_lifetime_frames
+        data:
+          value: 0
+
+  p1s_ai_apply_defaults:
+    alias: "P1S AI - Apply default tunables"
+    sequence:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.p1s_ai_sensitivity
+        data:
+          value: 1.0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.p1s_ai_cooldown_minutes
+        data:
+          value: 15

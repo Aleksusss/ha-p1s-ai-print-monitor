@@ -1,0 +1,13 @@
+# Secrets and local data
+.env
+*.env
+!.env.example
+secrets.yaml
+ml-backend/redis/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

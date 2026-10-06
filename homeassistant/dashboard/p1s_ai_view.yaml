@@ -1,0 +1,144 @@
+# P1S AI Print Monitor - dashboard view (built-in cards only)
+# Replace p1s_yourserial in the camera and light entities, then paste as a new view in YAML mode.
+title: P1S AI
+path: p1s-ai
+icon: mdi:robot
+type: sections
+max_columns: 4
+sections:
+  - type: grid
+    column_span: 4
+    cards:
+      - type: heading
+        heading: P1S AI
+        heading_style: title
+      - type: picture-entity
+        entity: camera.p1s_yourserial_camera
+        camera_image: camera.p1s_yourserial_camera
+        camera_view: live
+        fit_mode: cover
+        aspect_ratio: '16:9'
+        name: P1S Camera
+        show_name: true
+        show_state: true
+        grid_options:
+          columns: full
+      - type: tile
+        entity: input_boolean.p1s_ai_enabled
+        name: AI
+        features:
+          - type: toggle
+      - type: tile
+        entity: input_boolean.p1s_ai_auto_pause_enabled
+        name: Auto Pause
+        features:
+          - type: toggle
+      - type: tile
+        entity: input_boolean.p1s_ai_notify_only_mode
+        name: Notify Only
+        features:
+          - type: toggle
+      - type: tile
+        entity: input_boolean.p1s_ai_alert_active
+        name: Alert
+      - type: tile
+        entity: input_text.p1s_ai_status
+        name: Status
+        grid_options:
+          columns: full
+      - type: tile
+        entity: input_number.p1s_ai_score
+        name: Score
+      - type: tile
+        entity: light.p1s_yourserial_chamber_light
+        name: Chamber Light
+        features:
+          - type: toggle
+      - type: tile
+        entity: input_datetime.p1s_last_ai_check
+        name: Last Check
+      - type: tile
+        entity: input_datetime.p1s_last_ai_alert
+        name: Last Alert
+      - type: tile
+        entity: input_boolean.p1s_auto_light_off_on_print
+        name: Light Off on Print (AI off only)
+        grid_options:
+          columns: full
+        features:
+          - type: toggle
+  - type: grid
+    column_span: 4
+    cards:
+      - type: heading
+        heading: Controls
+        heading_style: title
+      - type: tile
+        entity: script.p1s_ai_acknowledge_false_alarm
+        name: Acknowledge False Alarm
+        features:
+          - type: button
+      - type: tile
+        entity: script.p1s_ai_resume_after_review
+        name: Resume After Review
+        features:
+          - type: button
+      - type: tile
+        entity: script.p1s_ai_stop_after_review
+        name: Stop After Review
+        features:
+          - type: button
+      - type: tile
+        entity: script.p1s_ai_reset_alert_state
+        name: Reset Alert State
+        features:
+          - type: button
+      - type: tile
+        entity: input_number.p1s_ai_sensitivity
+        name: Sensitivity
+        features:
+          - type: numeric-input
+            style: slider
+      - type: tile
+        entity: input_number.p1s_ai_cooldown_minutes
+        name: Cooldown
+        features:
+          - type: numeric-input
+            style: slider
+      - type: tile
+        entity: script.p1s_ai_reset_baseline
+        name: Reset Baseline
+        features:
+          - type: button
+  - type: grid
+    column_span: 4
+    cards:
+      - type: heading
+        heading: Statistics
+        heading_style: title
+      - type: history-graph
+        title: AI signal
+        hours_to_show: 6
+        grid_options:
+          columns: full
+        entities:
+          - entity: input_number.p1s_ai_frame_p
+            name: Frame p
+          - entity: input_number.p1s_ai_ewm
+            name: EWM
+          - entity: input_number.p1s_ai_baseline
+            name: Baseline
+          - entity: input_number.p1s_ai_score
+            name: Score
+      - type: history-graph
+        hours_to_show: 24
+        entities:
+          - counter.p1s_ai_total_alerts
+      - type: history-graph
+        hours_to_show: 24
+        entities:
+          - counter.p1s_ai_total_auto_pauses
+      - type: history-graph
+        hours_to_show: 24
+        entities:
+          - counter.p1s_ai_total_false_alarms
