@@ -2,7 +2,7 @@
 
 Camera-based print failure ("spaghetti") detection for the Bambu Lab P1S in Home Assistant, using a self-hosted [Obico](https://github.com/TheSpaghettiDetective/obico-server) ML backend and Obico's own scoring logic to keep false alarms down.
 
-> **Status: experimental (v0.1.0).** Tested on one P1S with Home Assistant OS and an x86-64 Docker host. Run it in Notify Only mode first and do not treat it as a safety device.
+> **Status: experimental.** Tested on one P1S with Home Assistant OS and an x86-64 Docker host. Run it in Notify Only mode first and do not treat it as a safety device.
 
 ## Why
 
@@ -37,7 +37,7 @@ See [docs/how-it-works.md](docs/how-it-works.md) for the scoring details.
 | --- | --- |
 | Home Assistant | 2024.10 or newer, with YAML packages enabled |
 | Printer integration | [ha-bambulab](https://github.com/greghesp/ha-bambulab) with P1S entities, including a working camera entity |
-| ML host | Any Docker host on the LAN; x86-64 recommended, no GPU needed |
+| ML host | An x86-64 (amd64) Docker host on the LAN, no GPU needed. HA Green, HA Yellow and Raspberry Pi cannot run it |
 | Network | The ML host can reach `http://<HA IP>:8123` |
 | Notifications | Home Assistant Companion app |
 
@@ -65,6 +65,7 @@ docs/                                    Installation guide and design notes
 
 - One P1S per package. Other Bambu models with a camera may work after renaming entities, but this is untested.
 - Entity IDs assume an English Home Assistant setup; translated entity IDs must be replaced by hand.
+- The Obico ML backend runs on x86-64 only. ARM machines such as HA Green, HA Yellow and Raspberry Pi cannot run it, not even as a Home Assistant add-on, so you need a separate x86-64 machine.
 - The ML container downloads snapshots from HA over plain HTTP on the LAN.
 - Snapshots in `/config/www/obico` are served at `/local/` without authentication. Block that path if HA is exposed to the internet.
 - The `time-sensitive` notification level is an iOS feature; Android ignores it.

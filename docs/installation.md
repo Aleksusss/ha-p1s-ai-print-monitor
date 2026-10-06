@@ -40,14 +40,14 @@ Check that these printer entities exist with your prefix. If Home Assistant was 
 
 ## Step 1: Deploy the ML backend
 
-The Obico ML container does the image analysis. It runs on any Docker host on the LAN and needs no GPU. The files are in [`ml-backend/`](../ml-backend/).
+The Obico ML container does the image analysis. It runs on an x86-64 Docker host on the LAN and needs no GPU. The files are in [`ml-backend/`](../ml-backend/).
 
 1. On the Docker host, generate a token: `openssl rand -hex 20`.
 2. Copy `compose.yaml` and `.env.example` to a stack folder, then `cp .env.example .env` and put your token in `ML_API_TOKEN`.
 3. Start it with `docker compose up -d`, or deploy it from Dockge or Portainer.
 4. Check that it answers: `curl -i http://ML_HOST:3333/p/`. Any HTTP reply, usually 401 because no token was sent, means it is up. "Connection refused" means it is not running or port 3333 is blocked.
 
-This setup was tested on an x86-64 host; on an ARM host, confirm the container starts before going further. Keep port 3333 reachable from the LAN only and never commit your `.env`. If the token ever leaks, generate a new one and update both `.env` and the HA secret from Step 2.
+The ML host must be an x86-64 (amd64) machine. Obico ML does not run on ARM, so Home Assistant Green, Home Assistant Yellow and Raspberry Pi cannot host it, not even as a Home Assistant add-on. Keep port 3333 reachable from the LAN only and never commit your `.env`. If the token ever leaks, generate a new one and update both `.env` and the HA secret from Step 2.
 
 ## Step 2: Prepare Home Assistant
 

@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-10-06
+
+### Changed
+
+- CI: `actions/checkout` v4 → v6 and `gitleaks/gitleaks-action` v2 → v3, which run on Node 24 and remove the Node 20 deprecation warnings.
+- Docs: the ML backend requires an x86-64 machine; HA Green, HA Yellow and Raspberry Pi cannot run it, not even as an add-on.
+
 ## [0.1.0] - 2026-10-06
 
 First public release. Experimental: tested on one Bambu Lab P1S.
@@ -16,4 +23,5 @@ First public release. Experimental: tested on one Bambu Lab P1S.
 - Docker Compose stack for the Obico ML backend.
 - Installation guide and design notes.
 
+[0.1.1]: ../../releases/tag/v0.1.1
 [0.1.0]: ../../releases/tag/v0.1.0
