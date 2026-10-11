@@ -35,7 +35,7 @@ The baseline is what keeps false alarms down: a feature of your camera view that
 
 ## Alerting and review
 
-- A warning sets `input_boolean.p1s_ai_alert_active`, saves the analysed frame to `alert.jpg` and sends "P1S alert". While the alert is active, further warnings are suppressed.
+- A warning sets `input_boolean.p1s_ai_alert_active`, saves the analysed frame to `/config/www/obico/alert-<YYYYMMDD-HHMMSS>.jpg` and sends "P1S alert". While the alert is active, further warnings are suppressed.
 - A pause presses the printer's pause button, waits up to 30 s for the printer to leave `running`, and sends "P1S paused", or "PAUSE FAILED" if it did not stop.
 - The review buttons clear the alert. Resume and Acknowledge False Alarm start a cooldown (15 min by default) during which no new alerts or pauses fire. The cooldown is stored in an `input_datetime`, so it survives restarts.
 - Resuming from the printer or Bambu Handy after an alert is treated as a review.
@@ -59,4 +59,5 @@ On the first layers the model sees thin outlines on a bare plate, and these look
 
 - Smoothed values are rendered with fixed-point formatting (`'%.6f' | format(...)`). Home Assistant keeps template results such as `8e-05` as strings, which would break the arithmetic when the averages approach zero.
 - The automation runs in `single` mode with `max_exceeded: silent`, so a slow ML response skips a tick instead of queueing frames.
+- Every alert gets its own image file instead of one `alert.jpg` with a `?v=<timestamp>` cache-buster: the iOS Companion app returns 404 for notification image URLs with a query string. Alert frames are deleted after 7 days.
 - The ML request uses `rest_command` with `response_variable`, so errors are visible in the status text instead of being read as "no detections".

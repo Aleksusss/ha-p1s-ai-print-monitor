@@ -67,7 +67,7 @@ docs/                                    Installation guide and design notes
 - Entity IDs assume an English Home Assistant setup; translated entity IDs must be replaced by hand.
 - The Obico ML backend runs on x86-64 only. ARM machines such as HA Green, HA Yellow and Raspberry Pi cannot run it, not even as a Home Assistant add-on, so you need a separate x86-64 machine.
 - The ML container downloads snapshots from HA over plain HTTP on the LAN.
-- Snapshots in `/config/www/obico` are served at `/local/` without authentication. Block that path if HA is exposed to the internet.
+- Snapshots in `/config/www/obico`, including the alert frames of the last 7 days, are served at `/local/` without authentication. Block that path if HA is exposed to the internet.
 - The `time-sensitive` notification level is an iOS feature; Android ignores it.
 - Small failures on parts far from the camera are seen late. The P1S camera looks across the plate from the front, and in the first real failure a detached part was paused about 21 minutes after it came loose. Monitoring does not replace good bed adhesion.
 

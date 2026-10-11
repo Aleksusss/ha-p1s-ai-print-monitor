@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-10-11
+
+### Fixed
+
+- Notification images were missing on iOS: the Companion app returns 404 for an image URL with a query string, and every alert used `alert.jpg?v=<timestamp>`. Each alert now saves its own `alert-<YYYYMMDD-HHMMSS>.jpg` and links it without a query string.
+
+### Added
+
+- `shell_command.p1s_ai_cleanup_alerts`, run by the daily 04:30 cleanup, deletes alert frames older than 7 days.
+
+### Docs
+
+- Alert frame location and retention, a troubleshooting row for notifications without an image, and a note that the alert frames are publicly reachable under `/local/obico/`.
+
 ## [0.2.0] - 2026-10-11
 
 Changes from the first real failures on a P1S, see [docs/field-reports.md](docs/field-reports.md).
@@ -42,6 +56,7 @@ First public release. Experimental: tested on one Bambu Lab P1S.
 - Docker Compose stack for the Obico ML backend.
 - Installation guide and design notes.
 
+[0.2.1]: ../../releases/tag/v0.2.1
 [0.2.0]: ../../releases/tag/v0.2.0
 [0.1.1]: ../../releases/tag/v0.1.1
 [0.1.0]: ../../releases/tag/v0.1.0

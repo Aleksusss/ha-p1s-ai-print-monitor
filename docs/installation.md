@@ -82,7 +82,7 @@ p1s_ml_auth_header: "Bearer <your token>"
                 - (state_attr('input_datetime.p1s_last_ai_alert', 'timestamp') | float(0)) < 60) }}
 ```
 
-Security note: files in `/config/www` are served at `/local/` without login. If HA is reachable from the internet, block `/local/obico/` on your reverse proxy or tunnel.
+Security note: files in `/config/www` are served at `/local/` without login; this includes the alert frames of the last 7 days. If HA is reachable from the internet, block `/local/obico/` on your reverse proxy or tunnel.
 
 ## Step 3: Install the package
 
@@ -199,7 +199,7 @@ Switching the light off from HA is respected until the next print. Switching it 
 
 ## Tuning
 
-Change settings only after a real false alarm, and decide from the recorded data. Every frame whose strongest box has confidence 0.2 or higher is copied to `/homeassistant/obico_history/<YYYYMMDD-HHMMSS>.jpg` and kept for 14 days. A Logbook entry named "P1S AI" lists its boxes as `[conf, xc, yc, w, h]`: confidence, then box centre and size in snapshot pixels.
+Change settings only after a real false alarm, and decide from the recorded data. Every frame whose strongest box has confidence 0.2 or higher is copied to `/homeassistant/obico_history/<YYYYMMDD-HHMMSS>.jpg` and kept for 14 days. A Logbook entry named "P1S AI" lists its boxes as `[conf, xc, yc, w, h]`: confidence, then box centre and size in snapshot pixels. The frame sent with each notification is kept as `/homeassistant/www/obico/alert-<YYYYMMDD-HHMMSS>.jpg` for 7 days.
 
 | Setting | Where | Default | Effect |
 | --- | --- | --- | --- |
@@ -239,6 +239,7 @@ The Status tile (`input_text.p1s_ai_status`) names most problems directly.
 | `ML error (no response)` | ML container unreachable | Check the container, `ML_HOST` and port 3333 |
 | Status never changes | The score automation is not running | Automations → "P1S AI - Score frame (every 10 s)" → ⋮ → Traces shows the failed condition or error |
 | Frequent false warnings | Something in view looks like a failure to the model | Collect Logbook entries and archived frames, then add a zone or lower sensitivity (see [Tuning](#tuning)) |
+| Notification arrives without an image | The app cannot load `/local/obico/alert-<YYYYMMDD-HHMMSS>.jpg` | Open that URL in a browser, both on the LAN and through your external URL; on iOS the image URL must not contain a query string |
 | Light keeps switching back | Another automation controls the chamber light | Disable it (Step 2.4) |
 | Two notifications per AI pause | Your own pause notification fires as well | Add the condition from Step 2.4 |
 | "Entity not available" on the dashboard | A placeholder was missed or the package did not load | Re-run the check from Step 3.2, then Check configuration |

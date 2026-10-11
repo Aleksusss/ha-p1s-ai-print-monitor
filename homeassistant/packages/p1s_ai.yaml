@@ -161,8 +161,11 @@ rest_command:
 shell_command:
   # Templated commands run without a shell (no pipes/redirects) - plain cp is fine.
   p1s_ai_archive_frame: "cp /config/www/obico/latest.jpg /config/obico_history/{{ frame_id }}.jpg"
-  p1s_ai_save_alert_frame: "cp /config/www/obico/latest.jpg /config/www/obico/alert.jpg"
+  # One file per alert: the iOS Companion app returns 404 for image URLs with a query string,
+  # so a "?v=" cache-buster cannot be used.
+  p1s_ai_save_alert_frame: "cp /config/www/obico/latest.jpg /config/www/obico/alert-{{ alert_id }}.jpg"
   p1s_ai_cleanup_history: "find /config/obico_history -name '*.jpg' -mtime +14 -delete"
+  p1s_ai_cleanup_alerts: "find /config/www/obico -name 'alert-*.jpg' -mtime +7 -delete"
 
 automation:
   # ---------------------------------------------------------------------------
@@ -388,11 +391,14 @@ automation:
             {{ is_state('input_boolean.p1s_ai_auto_pause_enabled', 'on')
                and is_state('input_boolean.p1s_ai_notify_only_mode', 'off') }}
           already_alerted: "{{ is_state('input_boolean.p1s_ai_alert_active', 'on') }}"
-          img: "/local/obico/alert.jpg?v={{ as_timestamp(now()) | int }}"
+          alert_id: "{{ now().strftime('%Y%m%d-%H%M%S') }}"
+          img: "/local/obico/alert-{{ alert_id }}.jpg"
       - choose:
           - conditions: "{{ pause_level and can_pause and not in_cooldown }}"
             sequence:
               - action: shell_command.p1s_ai_save_alert_frame
+                data:
+                  alert_id: "{{ alert_id }}"
                 continue_on_error: true
               - action: button.press
                 target:
@@ -436,6 +442,8 @@ automation:
           - conditions: "{{ warn and not already_alerted and not in_cooldown }}"
             sequence:
               - action: shell_command.p1s_ai_save_alert_frame
+                data:
+                  alert_id: "{{ alert_id }}"
                 continue_on_error: true
               - action: counter.increment
                 target:
@@ -685,7 +693,7 @@ automation:
                   entity_id: input_boolean.p1s_ai_light_owned
 
   # ---------------------------------------------------------------------------
-  # Housekeeping: drop archived frames older than 14 days
+  # Housekeeping: drop archived frames older than 14 days, alert frames older than 7
   # ---------------------------------------------------------------------------
   - id: p1s_ai_cleanup_history
     alias: "P1S AI - Clean up archived frames"
@@ -694,6 +702,7 @@ automation:
         at: "04:30:00"
     actions:
       - action: shell_command.p1s_ai_cleanup_history
+      - action: shell_command.p1s_ai_cleanup_alerts
 
 script:
   p1s_ai_clear_alert:

@@ -8,5 +8,5 @@ Please report security issues privately through GitHub's **Report a vulnerabilit
 
 - Never post your ML API token, Home Assistant URL, IP addresses or printer serial in issues, logs or screenshots.
 - Keep the ML container's port 3333 reachable from your LAN only.
-- Snapshots in `/config/www/obico` are served at `/local/obico/` without authentication. If Home Assistant is reachable from the internet, block that path on your reverse proxy or tunnel.
+- Snapshots in `/config/www/obico`, including the alert frames of the last 7 days, are served at `/local/obico/` without authentication. If Home Assistant is reachable from the internet, block that path on your reverse proxy or tunnel.
 - If a token leaks, generate a new one and update both the ML stack's `.env` and the `p1s_ml_auth_header` secret.
