@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-10-11
+
+Changes from the first real failures on a P1S, see [docs/field-reports.md](docs/field-reports.md).
+
+### Added
+
+- Automation "P1S AI - Auto-clear stale alert": an alert nobody reviewed is cleared once the score has stayed below 0.38 for 10 minutes while printing. No cooldown and no notification, so the next warning notifies again.
+
+### Changed
+
+- Frames on layers below `min_layer` (default 3) are skipped with the status `Skipped: first layers`, because first-layer outlines look like strings to the model. The frame counter does not advance, so the warm-up starts after these layers. A non-numeric layer sensor never skips a frame.
+
+### Docs
+
+- New field report with the first two real failures and their timelines.
+- README: limitation on late detection of small failures far from the camera.
+- Installation guide: `min_layer` tuning row, auto-clear, and pressing a review button after a warning.
+- How it works: first-layer skip and auto-clear.
+
 ## [0.1.1] - 2026-10-06
 
 ### Changed
@@ -23,5 +42,6 @@ First public release. Experimental: tested on one Bambu Lab P1S.
 - Docker Compose stack for the Obico ML backend.
 - Installation guide and design notes.
 
+[0.2.0]: ../../releases/tag/v0.2.0
 [0.1.1]: ../../releases/tag/v0.1.1
 [0.1.0]: ../../releases/tag/v0.1.0

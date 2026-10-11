@@ -69,6 +69,9 @@ docs/                                    Installation guide and design notes
 - The ML container downloads snapshots from HA over plain HTTP on the LAN.
 - Snapshots in `/config/www/obico` are served at `/local/` without authentication. Block that path if HA is exposed to the internet.
 - The `time-sensitive` notification level is an iOS feature; Android ignores it.
+- Small failures on parts far from the camera are seen late. The P1S camera looks across the plate from the front, and in the first real failure a detached part was paused about 21 minutes after it came loose. Monitoring does not replace good bed adhesion.
+
+Real failures and what the monitor did with them are described in [docs/field-reports.md](docs/field-reports.md).
 
 ## Related projects
 

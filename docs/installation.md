@@ -33,7 +33,7 @@ Check that these printer entities exist with your prefix. If Home Assistant was 
 | --- | --- |
 | `sensor.<prefix>_print_status` | Print state: `running`, `pause`, `finish`, `failed` |
 | `sensor.<prefix>_current_stage` | Skipping calibration and prep stages; must read `printing` during a real print |
-| `sensor.<prefix>_current_layer` | Logged with archived frames |
+| `sensor.<prefix>_current_layer` | Skipping the first layers; logged with archived frames |
 | `camera.<prefix>_camera` | Snapshots for the model |
 | `light.<prefix>_chamber_light` | Chamber light control |
 | `button.<prefix>_pause_printing`, `_resume_printing`, `_stop_printing` | Pause, resume and stop |
@@ -146,7 +146,7 @@ Run the first one or two prints in Notify Only mode, where the AI warns but neve
 | Check | Expected during the print |
 | --- | --- |
 | Chamber light | On for the whole print. If it was off before the start, it turns on at `prepare` and off 5 min after the print ends |
-| Status sequence | `Skipped: <stage>` during heating and calibration, then `Warming up (1/30)` for about 5 min, then `OK` |
+| Status sequence | `Skipped: <stage>` during heating and calibration, `Skipped: first layers` on the first layers, then `Warming up (1/30)` for about 5 min, then `OK` |
 | Current stage | `sensor.<prefix>_current_stage` reads `printing` during actual printing; otherwise the status stays on `Skipped` |
 | Last result | `input_text.p1s_last_ai_result_raw` mostly shows small `p` values, often `n=0/0` |
 | AI signal graph | Score stays well below 0.38 |
@@ -185,6 +185,8 @@ The AI has two levels: a warning keeps the print running, a pause needs a signal
 
 The Alert tile is an indicator, not a setting. It switches on when the AI raises an alert, and off with the buttons above or when a print starts or ends. Never switch it on by hand: while it is on, new warnings are suppressed.
 
+After a warning, look at the frame and press a review button: Acknowledge False Alarm if the print is fine, Stop After Review if it is ruined. If nobody reacts, the alert clears itself once the score has stayed below 0.38 for 10 minutes while printing; the status then reads `Alert auto-cleared`. This starts no cooldown and sends no notification, so the next warning notifies again. A pause is never blocked by an active alert.
+
 Resuming from the printer screen or Bambu Handy after an alert also counts as reviewed and starts the cooldown. Do not reset the baseline for day and night: it averages about 20 hours of printing and absorbs those changes.
 
 | AI | Light Off on Print | Chamber light |
@@ -207,6 +209,7 @@ Change settings only after a real false alarm, and decide from the recorded data
 | `min_conf` | Same | 0.08 | Ignores boxes below this confidence |
 | `archive_min_conf` | Same | 0.2 | Archive threshold |
 | `light_settle_s` | Same | 20 s | Frames skipped after the light switches |
+| `min_layer` | Same | 3 | Frames on layers below this are skipped; first-layer outlines look like strings to the model. Never skips when the layer sensor is unavailable |
 
 Leave the Obico constants (`ewm_alpha`, `win_short`, `win_long`, `t_low`, `t_high`, `safe_frames`, `short_mult`, `escalate`) unchanged; they are tuned for the 10 s interval. After editing variables, reload automations in Developer Tools → YAML.
 
@@ -228,6 +231,7 @@ The Status tile (`input_text.p1s_ai_status`) names most problems directly.
 | `Disabled` | AI is off | Turn AI on |
 | `Skipped: chamber light off` | Light is off, so frames are not analysed | Turn the light on; look for another automation that controls it |
 | `Skipped: light settling` | First 20 s after a light change | Wait |
+| `Skipped: first layers` | Current layer is below `min_layer` | Normal at the start of a print |
 | `Skipped: <stage>` | Heating, levelling, filament change and similar prep stages | Normal during prep; if it stays while actually printing, check what `current_stage` reads |
 | `Warming up (n/30)` | First 30 scored frames of a print, about 5 min | Normal |
 | `ML error (401)` | Token mismatch | Make `p1s_ml_auth_header` match `.env` |

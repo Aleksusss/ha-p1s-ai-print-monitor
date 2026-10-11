@@ -4,7 +4,7 @@
 
 Every 10 s, while the print status is `running`, the automation "P1S AI - Score frame (every 10 s)" does the following:
 
-1. **Skip unusable frames.** If the chamber light is off, if the light changed less than 20 s ago, or if the current stage is not `printing`, the frame is skipped and the status shows why.
+1. **Skip unusable frames.** If the chamber light is off, if the light changed less than 20 s ago, if the current stage is not `printing`, or if the current layer is below `min_layer` (3), the frame is skipped and the status shows why. Skipped frames are not counted, so the 30-frame warm-up starts after the first layers.
 2. **Snapshot.** `camera.snapshot` writes the frame to `/config/www/obico/latest.jpg`.
 3. **ML request.** `rest_command.p1s_ai_ml_predict` sends the image URL to the Obico ML container, which downloads the image and returns a list of detections `[label, confidence, [xc, yc, w, h]]`.
 4. **Score and smooth** the result (below).
@@ -39,6 +39,9 @@ The baseline is what keeps false alarms down: a feature of your camera view that
 - A pause presses the printer's pause button, waits up to 30 s for the printer to leave `running`, and sends "P1S paused", or "PAUSE FAILED" if it did not stop.
 - The review buttons clear the alert. Resume and Acknowledge False Alarm start a cooldown (15 min by default) during which no new alerts or pauses fire. The cooldown is stored in an `input_datetime`, so it survives restarts.
 - Resuming from the printer or Bambu Handy after an alert is treated as a review.
+- "P1S AI - Auto-clear stale alert" clears an alert nobody reviewed once `input_number.p1s_ai_score` has stayed below 0.38 for 10 minutes while the print is `running`. It starts no cooldown and sends no notification, so a later warning notifies again. The pause level never checks the alert flag, so an active alert does not block a pause.
+
+**Known limitations of the auto-clear.** A Home Assistant restart during the 10-minute countdown cancels it, and if the 10 minutes end while the print is paused, the `running` condition fails; in both cases the alert stays on until the score rises above 0.38 and then stays below it for another 10 minutes, or a review button is pressed.
 
 ## Print lifecycle
 
@@ -47,6 +50,10 @@ The baseline is what keeps false alarms down: a feature of your camera view that
 ## Chamber light
 
 "P1S - Chamber light control" keeps the light on during prints while the AI is enabled, and switches it off 5 min after the print only if it switched it on itself (`input_boolean.p1s_ai_light_owned`). A light switched off from Home Assistant is respected until the next print; one switched off by the firmware, the printer screen or Bambu Handy is turned back on while the AI needs it. With the AI disabled, `input_boolean.p1s_auto_light_off_on_print` keeps a dark-print mode.
+
+## First layers
+
+On the first layers the model sees thin outlines on a bare plate, and these look like strings to it. In the first real-print test this caused a false warning on the first layer. Frames are therefore skipped while `sensor.<prefix>_current_layer` is below `min_layer`. If the layer sensor is unavailable or not a number, frames are scored as usual, so a broken sensor cannot switch the monitoring off. The value 3 is a first guess, not a measured optimum.
 
 ## Implementation notes
 

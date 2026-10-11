@@ -205,9 +205,15 @@ automation:
       light_settle_s: 20
       light_age: >-
         {{ as_timestamp(now()) - as_timestamp(states.light.p1s_yourserial_chamber_light.last_changed, 0) }}
+      # First-layer outlines look like strings to the model: skip layers below min_layer.
+      # A non-numeric layer sensor (unavailable, unknown) never skips a frame.
+      min_layer: 3
+      layer: "{{ states('sensor.p1s_yourserial_current_layer') }}"
+      first_layers: "{{ layer | is_number and layer | float(0) < min_layer }}"
     actions:
-      # 1. Only score frames the model can make sense of
-      - if: "{{ not light_on or light_age < light_settle_s or stage != 'printing' }}"
+      # 1. Only score frames the model can make sense of. Runs before the frame
+      #    counter, so warm-up starts after min_layer.
+      - if: "{{ not light_on or light_age < light_settle_s or stage != 'printing' or first_layers }}"
         then:
           - action: input_text.set_value
             target:
@@ -216,7 +222,8 @@ automation:
               value: >-
                 {%- if not light_on -%}Skipped: chamber light off
                 {%- elif light_age < light_settle_s -%}Skipped: light settling
-                {%- else -%}Skipped: {{ stage }}{%- endif -%}
+                {%- elif stage != 'printing' -%}Skipped: {{ stage }}
+                {%- else -%}Skipped: first layers{%- endif -%}
           - stop: "Frame not scored"
 
       # 2. Grab the frame and send it to the ML backend
@@ -455,6 +462,32 @@ automation:
                        else ('Will auto-pause if it gets worse.' if can_pause else 'Auto-pause is disabled.') }}
                   data:
                     image: "{{ img }}"
+
+  # ---------------------------------------------------------------------------
+  # Clear a warning nobody reviewed once the score has stayed low for 10 min,
+  # so the next warning is not suppressed. Pauses are never blocked by an alert.
+  # ---------------------------------------------------------------------------
+  - id: p1s_ai_auto_clear_alert
+    alias: "P1S AI - Auto-clear stale alert"
+    description: "Score below t_low for 10 min while printing -> clear the alert, no cooldown"
+    triggers:
+      - trigger: numeric_state
+        entity_id: input_number.p1s_ai_score
+        below: 0.38
+        for: "00:10:00"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.p1s_ai_alert_active
+        state: "on"
+      - condition: state
+        entity_id: sensor.p1s_yourserial_print_status
+        state: "running"
+    actions:
+      - action: script.p1s_ai_clear_alert
+        data:
+          start_cooldown: false
+          status_text: "Alert auto-cleared"
+          raw_text: alert_auto_cleared
 
   # ---------------------------------------------------------------------------
   # Print lifecycle: reset per-print state on a new print, keep alerts on pause
